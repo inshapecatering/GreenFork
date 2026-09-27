@@ -61,11 +61,14 @@ function rutaSnapshot(empresa) {
 
 // Un snapshot ya no coincide byte-a-byte con el maestro si se lo generó de otra versión:
 // se reemplaza el projectRef real por el placeholder para poder compararlo con el maestro.
+// También se normaliza el nombre que el snapshot declara en db_app_version: nueva-empresa.mjs
+// lo resuelve al nombre propio del snapshot, y esa diferencia es a propósito, no un desfase.
 function leerSnapshot(empresa, m) {
   const ruta = rutaSnapshot(empresa);
   if (!ruta) return { ruta: null, coincide: null, esquema: null, hash: null, hashNorm: null };
   const texto = readFileSync(ruta, 'utf8');
-  const normalizado = empresa.projectRef ? texto.split(empresa.projectRef).join(PLACEHOLDER) : texto;
+  const conRef = empresa.projectRef ? texto.split(empresa.projectRef).join(PLACEHOLDER) : texto;
+  const normalizado = conRef.replace(/'setup', 'supabase-setup-[^']*\.sql'/, `'setup', 'supabase-setup-final.sql'`);
   const hashNorm = sha256(normalizado);
   return {
     ruta,

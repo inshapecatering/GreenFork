@@ -18,7 +18,7 @@ import { generateKeyPairSync } from 'node:crypto';
 
 const RAIZ = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // Hay que actualizarla cuando esta carpeta se reemplace por un ZIP de otra versión.
-const VERSION_CODIGO = 'v71';
+const VERSION_CODIGO = 'v72';
 const GENERICA = new Set(['catering', 'comida', 'gourmet', 'food', 'y', '&', 'de', 'la', 'el', 'los', 'las']);
 const MONEDAS = { BOB: 'es', Bs: 'es', PYG: 'es', Gs: 'es', ARS: 'es', CLP: 'es', COP: 'es', PEN: 'es', MXN: 'es', DOP: 'es', CRC: 'es', GTQ: 'es', UYU: 'es', USD: 'en', EUR: 'en' };
 
@@ -114,6 +114,11 @@ function leerRegistro(archivo) {
 function init(opts) {
   const ref = exigir(opts.ref, 'ref', /^[a-z0-9]{20}$/, 'es el ID de 20 caracteres de la URL del proyecto en Supabase.');
   const nombre = exigir(opts.empresa, 'empresa', null, 'nombre tal como se mostrará en la app.');
+  // Sin --out se escribe SOBRE el maestro: `destinoConfig`, el SQL y `carpeta: basename(RAIZ)`
+  // caerían encima de la copia de pruebas. Se permite solo si se lo pide explícitamente.
+  if (!opts.out && !opts.pruebas) {
+    throw new Error('Falta --out "<carpeta de la empresa>": sin esa bandera el script escribiría sobre la carpeta del maestro. Usá --pruebas solo si querés regenerar la copia de pruebas.');
+  }
   const salida = opts.out ? resolve(opts.out) : RAIZ;
   // Con --out el destino es el árbol de la empresa: config.js y manifest.json viven en public/,
   // no en la raíz (escribirlos en la raíz deja la app sin branding y nadie se entera).
@@ -180,10 +185,17 @@ function init(opts) {
   const crudo = readFileSync(sqlOriginal, 'utf8');
   const ocurrencias = crudo.split('<PROJECT_REF>').length - 1;
   if (!ocurrencias) throw new Error(`${sqlOriginal} no tiene <PROJECT_REF>: revisá el archivo antes de seguir.`);
-  const resuelto = crudo.replaceAll('<PROJECT_REF>', ref);
-  const sobrantes = resuelto.split('PROJECT_REF').length - 1;
+  const refResuelto = crudo.replaceAll('<PROJECT_REF>', ref);
+  const sobrantes = refResuelto.split('PROJECT_REF').length - 1;
   if (sobrantes) throw new Error(`Quedaron ${sobrantes} referencias a PROJECT_REF sin reemplazar en el SQL.`);
-  const sqlSalida = join(destSqlDir, `supabase-setup-${prefix.replace('catering-app-', '')}.sql`);
+  const sqlNombre = `supabase-setup-${prefix.replace('catering-app-', '')}.sql`;
+  // El snapshot tiene que reportar SU propio nombre en el marcador db_app_version (sección 23).
+  // Medido: sin este reemplazo las bases de los clientes decían "supabase-setup-final.sql" — el
+  // nombre del maestro copiado tal cual — y versiones.mjs armaba un inventario de versiones falso.
+  const AUTONOMBRE = `'setup', 'supabase-setup-final.sql'`;
+  if (!refResuelto.includes(AUTONOMBRE)) throw new Error(`${sqlOriginal} no tiene el literal ${AUTONOMBRE}: revisá la sección 23 (db_app_version) antes de seguir.`);
+  const resuelto = sqlNombre === 'supabase-setup-final.sql' ? refResuelto : refResuelto.replace(AUTONOMBRE, `'setup', '${sqlNombre}'`);
+  const sqlSalida = join(destSqlDir, sqlNombre);
   const previo = existsSync(sqlSalida) ? readFileSync(sqlSalida, 'utf8') : null;
   if (previo !== null && previo !== resuelto && !opts.force) {
     throw new Error(`${sqlSalida} ya existe con otro contenido. Usá --force para reemplazarlo.`);
@@ -276,6 +288,8 @@ const USO = `node scripts/nueva-empresa.mjs init --ref <project-ref> --empresa "
      [--instagram <url>] [--handle @usuario] [--logo icons/icon-512.png] [--moneda BOB] [--idioma es] \\
      [--corto "Catering Control"] [--publishable-key sb_publishable_...] \\
      [--vapid-public K --vapid-private K] [--out <dir>] [--pruebas] [--force]
+     --out es OBLIGATORIO para una empresa nueva (o --pruebas para regenerar la copia del maestro):
+     sin él el script escribiría sobre la carpeta master.
      --out escribe en <dir>/public/config.js y <dir>/public/manifest.json y no pisa los valores
      que ya estén cargados ahí; el VAPID existente se reusa (cambiarlo invalida el push suscripto).
 node scripts/nueva-empresa.mjs manifest [--corto "Rótulo del ícono PWA"]
